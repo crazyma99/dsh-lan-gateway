@@ -1,77 +1,125 @@
 # dsh-lan-gateway
 
-一个 **DeepSeek Harness (`dsh`) 插件**：按需把 dsh WebUI 通过**独立 HTTPS 网关**暴露给局域网设备。主服务始终只监听 `127.0.0.1`，风险边界清晰：
+**DeepSeek Harness (`dsh`) 局域网访问插件**：在 WebUI 设置页里一键开启，把 dsh WebUI 通过**独立 HTTPS 网关**安全地暴露给局域网设备。主服务始终只监听 `127.0.0.1`，风险边界清晰、默认关闭。
 
-- **默认关闭**，在 WebUI「设置 → 局域网访问」页实时开启/关闭（无需重启 dsh）；
-- 网关自带 **TLS 加密**（自签证书自动生成，或使用自定义证书）；
-- **精美登录页 + Cookie 会话**：未认证的浏览器访问会重定向到网关自带的登录页（跟随系统明暗主题），登录成功后签发 `HttpOnly; Secure; SameSite=Strict` 会话 Cookie（滑动续期 7 天）；HTTP Basic 仍可用于 curl 等非浏览器客户端；
-- 可选 **IP 白名单**（CIDR）；
-- 网关只做 loopback 转发并重写 `Host`/`Origin`，后端 `/api` 信任围栏与「设置/凭据仅本机可改」的约束原样保留——**局域网设备能使用 WebUI，但永远无法修改设置或读取凭据**。
+> 设计目标：让手机/平板/同网段设备安全使用 WebUI，同时**绝不**让局域网设备改动任何配置或凭据。
 
-## 结构
+## ✨ 特性
+
+- **精美登录页 + Cookie 会话**：未认证的浏览器访问重定向到网关自带的登录页（自动跟随系统明暗主题、按 `Accept-Language` 显示中/英），登录后签发 `HttpOnly; Secure; SameSite=Strict` 会话 Cookie，7 天滑动续期；HTTP Basic 继续支持 curl 等非浏览器客户端。
+- **TLS 全程加密**：只提供 HTTPS/WSS。自签证书（ECDSA P-256）自动生成，指纹在设置页展示供核对；也可改用自定义证书。
+- **首次开启 OOBE 引导**：无凭据时打开主开关，弹出「设置访问凭据」模态框（用户名 + 密码 + 确认密码），保存后自动开启。
+- **凭据管理模态框**：设置页「用户名与密码」一键修改，密码确认双输校验。
+- **IP 白名单（CIDR）**：进一步收窄来源网段。
+- **纵深防御**：网关把 `Host`/`Origin` 重写为 loopback 转发，主服务 `/api` 信任围栏原样生效；`settings.*`、`credentials.*`、插件自身 `/lan-gateway` 等**特权与管理 RPC 在网关上直接 403**——局域网设备只能使用 UI，永远不能改配置、读凭据。
+- **默认关闭 / 失败关闭**：密码为空时拒绝开启；端口占用、证书错误等以 `error` 状态展示，绝不降级成明文。
+- **登录限流**：同一来源 10 分钟内登录失败超过 5 次即被拒绝，防暴力破解。
+
+## 🧱 架构
+
+```
+局域网设备 ──https://192.168.1.5:8443──▶ dsh-lan-gateway（独立 HTTPS 反向代理）
+   │ 登录页/Cookie 会话 · TLS · IP 白名单 · Host/Origin 重写 · 特权 RPC 拦截
+   └──http://127.0.0.1:3080──▶ dsh 主 WebServer（保持仅本机监听，不改动）
+```
 
 ```
 dsh-lan-gateway/
 ├── src/
-│   ├── index.ts                 # Cordis host 半：引擎 + 设置命名空间 + 状态 RPC
-│   ├── settings.ts              # lan-gateway 设置 schema（扁平，password 为 secret）
-│   ├── gateway.ts               # 纯 Node 网关引擎（TLS/认证/白名单/反向代理）
+│   ├── index.ts                 # Cordis host 半：配置存储 + 引擎 + loopback RPC
+│   ├── config-store.ts          # config.json 持久化（0600，部署默认 + 用户层）
+│   ├── gateway.ts               # 纯 Node 网关引擎（TLS/登录页/会话/白名单/代理）
+│   ├── login-page.ts            # 自包含登录页（明暗主题 + 中英双语）
 │   ├── selfsigned.ts            # 零依赖自签 X.509 生成（ECDSA P-256 / SHA-256）
-│   ├── auth.ts                  # Basic 认证解析 + 恒定时间比较
+│   ├── auth.ts                  # Basic 解析 + 恒定时间比较
 │   ├── cidr.ts                  # CIDR / IPv4/IPv6 匹配
-│   └── client/                  # 浏览器半：设置页 section + 文案
+│   └── client/                  # 浏览器半：设置页 section（Switch/状态卡/凭据模态）
 ├── cordis.patch.yml             # bundle patch：把插件挂进组合
-├── scripts/build.mjs            # esbuild：lib/index.js（Node ESM）+ lib/client.js（浏览器工厂）
-└── tests/                       # vitest 单元/集成测试（纯 Node，无需 dsh）
+├── scripts/build.mjs            # esbuild：lib/index.js + lib/client.js + 类型
+├── docs/security.md             # 安全模型全文
+└── tests/                       # vitest（30 个用例：证书/认证/会话/登录/代理/胶水层）
 ```
 
-## 构建
+## 🔧 构建
 
 ```sh
 pnpm install        # 若提示 esbuild 构建脚本被忽略，先运行 pnpm approve-builds 批准 esbuild
 pnpm run build      # 产出 lib/index.js、lib/client.js 与 lib/types
-pnpm run typecheck  # 对照本地 dsh checkout 的类型声明校验
+pnpm run typecheck  # 对照本地 dsh checkout 的类型声明校验（路径见 tsconfig.json 的 paths）
 pnpm test           # vitest
 ```
 
 > 类型检查通过 `tsconfig.json` 的 `paths` 指向 `/home/majunhi/deepseek-harness` 各包的
 > `lib/types/*.d.ts`。如果 checkout 路径不同，请修改 `paths`。
 
-## 安装到 dsh profile
+## 📦 安装到 dsh profile
 
-以当前 `web` profile（`~/.dsh/profiles/web`）为例：
+以 `web` profile（`~/.dsh/profiles/web`）为例：
 
 ```sh
 # 1. 把插件声明为 profile 的依赖（本地链接）
 cd ~/.dsh/profiles/web
 pnpm add link:/home/majunhi/文档/dsh-lan-gateway
 
-# 2. 在 cordis.patch.yml 里挂载插件行（或把 "dsh-lan-gateway" 追加进
-#    package.json 的 dsh.profile.bundles，让插件的 cordis.patch.yml 生效）
-cat >> cordis.patch.yml <<'EOF'
-- insert:
-    - id: lan-gateway
-      name: 'dsh-lan-gateway'
-EOF
+# 2. 把插件加入 package.json 的 dsh.profile.bundles，让它的 cordis.patch.yml 生效：
+#      "dsh-lan-gateway"
+#    追加到 bundles 数组末尾即可。
 
 # 3. 重启 dsh web，打开 WebUI「设置 → 局域网访问」
 ```
 
-之后在设置页设置密码并开启，即可从局域网设备访问
-`https://<主机IP>:<端口>`（默认端口 8443）。
+## 🚀 使用
 
-## 安全模型（摘要）
+1. 打开 WebUI **设置 → 局域网访问**，打开主开关。
+2. **首次开启**：弹出「设置访问凭据」模态框，设置用户名与密码（二次确认）后点击「保存并开启」。
+3. 状态卡显示运行状态、访问地址（`https://<主机IP>:8443`）、证书 SHA-256 指纹与活动连接数。
+4. 局域网设备访问该地址 → 看到登录页 → 输入凭据登录。
+5. 修改凭据：**设置 → 局域网访问 → 用户名与密码**（改密后所有已登录会话立即失效）。
+6. 自签证书首次访问会有浏览器警告，**核对指纹后信任**；生产环境建议在设置里改用 CA 签发证书。
 
-- **加密**：只提供 HTTPS/WSS，不提供明文 HTTP。自签证书首次访问需在浏览器核对设置页展示的 SHA-256 指纹后信任；也可在设置里改用已有证书。
-- **认证**：登录页签发 HMAC 会话 Cookie（密钥派生自密码，改密码即全部会话失效），比较采用恒定时间哈希；登录失败按 IP 限流（10 分钟窗口）。
-- **纵深**：后端只看到 loopback 请求；`settings.*`/`credentials.*` 等特权 RPC 对局域网客户端依旧 403；状态查询 RPC 仅 loopback 可调。
-- **默认关闭**：`enabled` 默认 `false`；密码为空时 `validate` 拒绝开启。
+## 💾 数据与持久化
 
-详见 [docs/security.md](docs/security.md)。
+| 路径 | 内容 | 权限 |
+|---|---|---|
+| `$DSH_HOME/lan-gateway/config.json` | 网关配置（含密码） | `0600` |
+| `$DSH_HOME/lan-gateway/cert.pem` / `key.pem` | 自签证书与私钥 | `0644` / `0600` |
+| `$DSH_HOME/lan-gateway/session.key` | Cookie 签名密钥 | `0600` |
 
-## 已知边界（V1）
+配置在启动时读取，运行中通过设置页实时生效。`config.json` 删除即回到出厂默认（关闭、无密码）。
 
-- IPv6 白名单仅支持精确匹配；IPv4 支持 CIDR。
-- 局域网客户端无法修改任何设置（这是设计目标，不是缺陷）。
-- 插件在 checkout 外开发，改客户端代码后需要 `pnpm run build` 并**刷新页面**（不享受 `dev:web` 的 HMR）。
-- 状态页采用 2s 轮询；不做事件推送。
+## 🔌 插件 RPC（仅本机 loopback 可达）
+
+通道 `/lan-gateway`，`authority: 'loopback'`——局域网设备经网关访问一律 403：
+
+| 端点 | 请求 | 说明 |
+|---|---|---|
+| `status` | `{}` | 运行状态、实际端口、指纹、LAN 地址、活动连接 |
+| `config.get` | `{}` | 公开配置（密码只返回 `hasPassword` 布尔） |
+| `config.set` | `{ field, value }` | 单字段写入；宿主侧校验（开启前必须有密码） |
+
+## 🛡️ 安全模型
+
+摘要见上，完整威胁模型、剩余风险与缓解见 [docs/security.md](docs/security.md)。核心不变量：
+
+- 主服务**从不**绑定非回环地址；
+- 密码**永不**离开宿主机（RPC 不返回、登录只比对）；
+- 配置与管理面**永远**只对宿主机本机开放；
+- 一切失败**关闭**而非降级。
+
+## ⚠️ 已知边界（V1）
+
+- 单一用户名/密码；IPv6 白名单仅支持精确匹配（IPv4 支持 CIDR）。
+- Cookie 会话 7 天滑动续期；改密码会立即吊销全部会话。
+- 插件在 checkout 外开发：改代码后需 `pnpm run build`，客户端改动需**重启 dsh web + 刷新页面**（不享受 `dev:web` 的 HMR）。
+- 状态卡采用 2s 轮询，无事件推送。
+- 未实现多用户、mTLS 与审计日志（见 security.md 的 V2 计划）。
+
+## 📜 变更记录
+
+- `8c5fbc7` 登录页 + Cookie 会话取代浏览器原生 Basic 弹窗；登录限流。
+- `37297fa` 凭据 OOBE + 管理模态框；Switch 对比度修复；状态卡布局修复。
+- `0313f72` 首个可用版本：HTTPS 网关、config/status RPC、设置页、特权 RPC 拦截、30 项测试。
+
+## License
+
+MIT
