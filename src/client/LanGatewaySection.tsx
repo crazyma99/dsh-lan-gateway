@@ -7,7 +7,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
-import { Button, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { GatewayStatus } from '../gateway.ts'
 import type { LanGatewayPublicConfig } from '../settings.ts'
 import { LanGatewayStore } from './store.ts'
@@ -151,8 +151,16 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
 
   const [portDraft, setPortDraft] = useState<string>('')
   const [allowlistDraft, setAllowlistDraft] = useState<string>('')
-  const [passwordDraft, setPasswordDraft] = useState<string>('')
   const [saveState, setSaveState] = useState<{ kind: 'saved' } | { kind: 'failed'; message: string } | undefined>(undefined)
+
+  // Credential modal: 'enable' = first-run OOBE (saving also enables the
+  // gateway), 'edit' = later management from the settings page.
+  const [credentialOpen, setCredentialOpen] = useState(false)
+  const [credentialIntent, setCredentialIntent] = useState<'enable' | 'edit'>('edit')
+  const [credUsername, setCredUsername] = useState('')
+  const [credPassword, setCredPassword] = useState('')
+  const [credConfirm, setCredConfirm] = useState('')
+  const [credError, setCredError] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     if (config !== undefined && portDraft === '') setPortDraft(String(config.port))
@@ -210,15 +218,51 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
     await commit('allowlist', entries)
   }
 
-  const commitPassword = async (): Promise<void> => {
-    if (passwordDraft.length > 0) {
-      await commit('password', passwordDraft)
-      setPasswordDraft('')
-    }
+  const openCredentialModal = (intent: 'enable' | 'edit'): void => {
+    setCredentialIntent(intent)
+    setCredUsername(config?.username ?? 'dsh')
+    setCredPassword('')
+    setCredConfirm('')
+    setCredError(undefined)
+    setCredentialOpen(true)
   }
 
   const toggleEnabled = async (next: boolean): Promise<void> => {
+    // First-run OOBE: no credentials yet, guide through the modal; enabling
+    // happens only after a confirmed save.
+    if (next && config?.hasPassword !== true) {
+      openCredentialModal('enable')
+      return
+    }
     await commit('enabled', next)
+  }
+
+  const submitCredentials = async (): Promise<void> => {
+    const username = credUsername.trim()
+    if (username.length === 0 || credPassword.length === 0) {
+      setCredError(t('cred.error.empty'))
+      return
+    }
+    if (credPassword !== credConfirm) {
+      setCredError(t('cred.error.mismatch'))
+      return
+    }
+    if (username !== (config?.username ?? 'dsh')) {
+      if (!(await store.setField('username', username))) {
+        setCredError(t('form.saveFailed'))
+        return
+      }
+    }
+    if (await store.setField('password', credPassword) === undefined) {
+      setCredError(t('form.saveFailed'))
+      return
+    }
+    if (credentialIntent === 'enable') {
+      await store.setField('enabled', true)
+    }
+    setCredentialOpen(false)
+    flash({ kind: 'saved' })
+    void store.pollStatus()
   }
 
   return (
@@ -342,33 +386,18 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
         )}
 
         <div style={style.row}>
-          <span style={style.label}>{t('form.username')}</span>
-          <input
-            type="text"
-            defaultValue={config?.username ?? 'dsh'}
-            disabled={!connection.isLoopback}
-            onBlur={event => {
-              const value = event.target.value.trim()
-              if (value.length > 0 && value !== config?.username) void commit('username', value)
-            }}
-            style={{ ...style.input, width: 220 }}
-          />
-        </div>
-
-        <div style={style.row}>
           <div>
-            <div style={style.label}>{t('form.password')}</div>
-            <div style={style.muted}>{t('form.password.hint')}</div>
+            <div style={style.label}>{t('cred.manage')}</div>
+            <div style={style.muted}>{t('cred.manage.hint')}</div>
           </div>
-          <input
-            type="password"
-            value={passwordDraft}
-            placeholder={config?.hasPassword === true ? t('form.password.placeholder') : ''}
+          <Button
+            variant="outline"
+            size="sm"
             disabled={!connection.isLoopback}
-            onChange={event => setPasswordDraft(event.target.value)}
-            onBlur={() => { void commitPassword() }}
-            style={{ ...style.input, width: 220 }}
-          />
+            onClick={() => openCredentialModal('edit')}
+          >
+            {t('cred.manage.action')}
+          </Button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -403,6 +432,54 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
           )}
         </div>
       </fieldset>
+
+      <Modal
+        open={credentialOpen}
+        onClose={() => setCredentialOpen(false)}
+        title={credentialIntent === 'enable' ? t('cred.oobe.title') : t('cred.edit.title')}
+        closeLabel={t('cred.cancel')}
+        description={credentialIntent === 'enable' ? t('cred.oobe.description') : t('cred.edit.description')}
+        footer={(
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button variant="ghost" size="sm" onClick={() => setCredentialOpen(false)}>{t('cred.cancel')}</Button>
+            <Button variant="primary" size="sm" onClick={() => { void submitCredentials() }}>
+              {credentialIntent === 'enable' ? t('cred.saveEnable') : t('cred.save')}
+            </Button>
+          </div>
+        )}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '4px 0' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={style.label}>{t('cred.username')}</span>
+            <input
+              type="text"
+              value={credUsername}
+              autoFocus
+              onChange={event => setCredUsername(event.target.value)}
+              style={style.input}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={style.label}>{t('cred.password')}</span>
+            <input
+              type="password"
+              value={credPassword}
+              onChange={event => setCredPassword(event.target.value)}
+              style={style.input}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={style.label}>{t('cred.confirm')}</span>
+            <input
+              type="password"
+              value={credConfirm}
+              onChange={event => setCredConfirm(event.target.value)}
+              style={style.input}
+            />
+          </div>
+          {credError !== undefined && <div style={style.error}>{credError}</div>}
+        </div>
+      </Modal>
     </div>
   )
 }
