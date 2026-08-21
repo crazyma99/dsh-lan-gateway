@@ -44,6 +44,9 @@ export function apply(ctx: ClientContext): void {
     name: 'settings.section',
     id: 'lan-gateway',
     order: 70,
+    // Nav glyph vocabulary of the settings shell: a globe for the LAN gateway.
+    // Stock DSH builds ignore unknown options and fall back to the gear.
+    iconId: 'globe',
     label: () => t('nav'),
     inject: injected,
   }, LanGatewaySection))
