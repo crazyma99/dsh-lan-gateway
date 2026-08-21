@@ -17,7 +17,7 @@
 | 密码存储 | `role('secret')` 设置字段 | 任何 wire 表面脱敏；只存宿主机本地 settings 文档 |
 | 授权 | 可选 IP 白名单（CIDR） | 进一步收窄来源网段 |
 | Host/Origin 重写 | 转发到 loopback 并重写为 `127.0.0.1:<port>` | 后端 `/api` 信任围栏（DNS-rebinding/跨站防护）原样生效 |
-| 特权面隔离 | 状态 RPC 仅 `authority: 'loopback'`；`settings.*`/`credentials.*` 等对 LAN 客户端依旧 403 | 局域网设备只能使用 UI，不能改配置、读密钥 |
+| 特权面隔离 | 网关只放行脱敏的 `settings.describe`（页面渲染所需），`settings.update/replace/mutate/openDocument`、`credentials.*`、`llm.discoverModels`、preset 管理与 `host.*` 对话框、插件自身 `/lan-gateway` 一律 403 | 局域网设备可看（脱敏）不可改：不能改配置、读密钥、操作宿主机 |
 | 默认关闭 | `enabled: false`，密码为空时拒绝开启（`validate` 在写入时拦截） | 无意识暴露不可能 |
 | 失败关闭 | 端口占用/证书错误 → 状态 `error`，绝不降级为明文 | 宁可不服务，也不降低安全姿态 |
 | 生命周期 | 禁用/插件卸载时 `server.close()` + 销毁所有 socket | 无残留监听 |

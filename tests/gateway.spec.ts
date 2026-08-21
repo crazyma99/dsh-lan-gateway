@@ -300,19 +300,19 @@ describe('LanGatewayEngine', () => {
     expect(admitted.status).toBe(200)
   })
 
-  it('refuses privileged settings/credentials RPCs through the gateway', async () => {
+  it('allows redacted settings reads but refuses writes through the gateway', async () => {
     engine!.apply(config({}))
     const status = await waitFor(() => engine!.getStatus(), value => value.state === 'running')
-    // The harness pins the settings plane to loopback; the gateway must keep
-    // LAN clients out even though it rewrites Host to loopback.
+    // The harness pins the settings plane to loopback; the gateway keeps
+    // LAN clients out of every write even though it rewrites Host to loopback.
     const ordinary = await httpsGet(status.port!, { auth: 'dsh:s3cret', origin: 'http://192.168.1.5:8443' })
     expect(ordinary.status).toBe(200) // ordinary traffic still flows
 
-    const privileged = await new Promise<{ status: number }>((resolve, reject) => {
+    const post = (path: string): Promise<{ status: number }> => new Promise((resolve, reject) => {
       const request = https.request({
         host: '127.0.0.1',
         port: status.port!,
-        path: '/api/settings.describe',
+        path,
         method: 'POST',
         rejectUnauthorized: false,
         headers: { authorization: `Basic ${Buffer.from('dsh:s3cret').toString('base64')}` },
@@ -323,7 +323,13 @@ describe('LanGatewayEngine', () => {
       request.on('error', reject)
       request.end('{}')
     })
-    expect(privileged.status).toBe(403)
+
+    // Redacted read: settings pages render from it, so it must pass.
+    expect((await post('/api/settings.describe')).status).toBe(200)
+    // Writes and the rest of the privileged plane stay refused.
+    expect((await post('/api/settings.mutate')).status).toBe(403)
+    expect((await post('/api/settings.update')).status).toBe(403)
+    expect((await post('/api/credentials.describe')).status).toBe(403)
 
     // The plugin's own management channel must be equally unreachable.
     const management = await new Promise<{ status: number }>((resolve, reject) => {

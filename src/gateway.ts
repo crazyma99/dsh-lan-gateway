@@ -97,7 +97,13 @@ const UPGRADE_SKIP = new Set([
  * Keep this list in sync with the harness's PRIVILEGED_METHODS when upgrading.
  */
 const PRIVILEGED_API_PREFIXES = [
-  '/api/settings.',
+  // settings.describe stays reachable: it is redacted (no secrets) and every
+  // settings page needs it to render. All WRITES and the rest of the
+  // privileged plane remain loopback-only.
+  '/api/settings.update',
+  '/api/settings.replace',
+  '/api/settings.mutate',
+  '/api/settings.openDocument',
   '/api/credentials.',
   '/api/llm.discoverModels',
   '/api/agentPreset.read',
