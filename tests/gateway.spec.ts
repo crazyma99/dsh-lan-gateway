@@ -73,6 +73,9 @@ async function waitFor<T>(read: () => T, predicate: (value: T) => boolean, timeo
   }
 }
 
+/** Attempts per window before the gateway throttles login failures. */
+const RATE_ATTEMPTS = 7
+
 function httpsGet(port: number, options: { auth?: string; origin?: string }): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
   return new Promise((resolve, reject) => {
     const request = https.request({
@@ -130,7 +133,8 @@ describe('LanGatewayEngine', () => {
 
     const anonymous = await httpsGet(status.port!, {})
     expect(anonymous.status).toBe(401)
-    expect(anonymous.headers['www-authenticate']).toContain('Basic realm="dsh-lan-gateway"')
+    // No WWW-Authenticate: the browser must never see the native prompt.
+    expect(anonymous.headers['www-authenticate']).toBeUndefined()
 
     const wrong = await httpsGet(status.port!, { auth: 'dsh:wrong' })
     expect(wrong.status).toBe(401)
@@ -140,6 +144,148 @@ describe('LanGatewayEngine', () => {
     // The backend must see a loopback Host/Origin so its trust fence passes.
     expect(upstream!.seenHost).toBe(`127.0.0.1:${String(upstream!.port)}`)
     expect(upstream!.seenOrigin).toBe(`http://127.0.0.1:${String(upstream!.port)}`)
+  })
+
+  it('redirects unauthenticated navigations to the styled login page', async () => {
+    engine!.apply(config({}))
+    const status = await waitFor(() => engine!.getStatus(), value => value.state === 'running')
+
+    const navigation = await new Promise<{ status: number; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+      const request = https.request({
+        host: '127.0.0.1',
+        port: status.port!,
+        path: '/',
+        method: 'GET',
+        rejectUnauthorized: false,
+        headers: { accept: 'text/html' },
+      }, (response) => {
+        response.resume()
+        resolve({ status: response.statusCode ?? 0, headers: response.headers })
+      })
+      request.on('error', reject)
+      request.end()
+    })
+    expect(navigation.status).toBe(303)
+    expect(navigation.headers.location).toContain('/__lan_gateway_login')
+
+    const loginPage = await new Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }>((resolve, reject) => {
+      const request = https.request({
+        host: '127.0.0.1',
+        port: status.port!,
+        path: '/__lan_gateway_login',
+        method: 'GET',
+        rejectUnauthorized: false,
+        headers: { 'accept-language': 'zh-CN,zh;q=0.9' },
+      }, (response) => {
+        let body = ''
+        response.setEncoding('utf8')
+        response.on('data', chunk => { body += chunk })
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, headers: response.headers, body }))
+      })
+      request.on('error', reject)
+      request.end()
+    })
+    expect(loginPage.status).toBe(200)
+    expect(loginPage.headers['content-type']).toContain('text/html')
+    expect(loginPage.body).toContain('DeepSeek Harness')
+    expect(loginPage.body).toContain('登录')
+  })
+
+  it('logs in through the form, sets a session cookie, and proxies with it', async () => {
+    engine!.apply(config({}))
+    const status = await waitFor(() => engine!.getStatus(), value => value.state === 'running')
+
+    const login = await new Promise<{ status: number; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+      const request = https.request({
+        host: '127.0.0.1',
+        port: status.port!,
+        path: '/__lan_gateway_login',
+        method: 'POST',
+        rejectUnauthorized: false,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      }, (response) => {
+        response.resume()
+        resolve({ status: response.statusCode ?? 0, headers: response.headers })
+      })
+      request.on('error', reject)
+      request.end(`username=${encodeURIComponent('dsh')}&password=${encodeURIComponent('s3cret')}`)
+    })
+    expect(login.status).toBe(303)
+    const setCookie = login.headers['set-cookie']
+    expect(Array.isArray(setCookie) ? setCookie[0] : setCookie).toContain('lan_gateway_session=')
+    const cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)!.split(';')[0]!
+
+    // A request carrying the cookie is proxied through to the upstream.
+    const authed = await new Promise<{ status: number }>((resolve, reject) => {
+      const request = https.request({
+        host: '127.0.0.1',
+        port: status.port!,
+        path: '/hello',
+        method: 'GET',
+        rejectUnauthorized: false,
+        headers: { cookie },
+      }, (response) => {
+        response.resume()
+        resolve({ status: response.statusCode ?? 0 })
+      })
+      request.on('error', reject)
+      request.end()
+    })
+    expect(authed.status).toBe(200)
+    expect(upstream!.seenHost).toBe(`127.0.0.1:${String(upstream!.port)}`)
+
+    // A tampered cookie is refused.
+    const tampered = await new Promise<{ status: number }>((resolve, reject) => {
+      const request = https.request({
+        host: '127.0.0.1',
+        port: status.port!,
+        path: '/hello',
+        method: 'GET',
+        rejectUnauthorized: false,
+        headers: { cookie: `${cookie}x` },
+      }, (response) => {
+        response.resume()
+        resolve({ status: response.statusCode ?? 0 })
+      })
+      request.on('error', reject)
+      request.end()
+    })
+    expect(tampered.status).toBe(401)
+  })
+
+  it('rejects wrong login credentials with an error page and throttles repeated failures', async () => {
+    engine!.apply(config({}))
+    const status = await waitFor(() => engine!.getStatus(), value => value.state === 'running')
+
+    const postLogin = (password: string): Promise<{ status: number; body: string }> => new Promise((resolve, reject) => {
+      const request = https.request({
+        host: '127.0.0.1',
+        port: status.port!,
+        path: '/__lan_gateway_login',
+        method: 'POST',
+        rejectUnauthorized: false,
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'accept-language': 'zh-CN,zh;q=0.9',
+        },
+      }, (response) => {
+        let body = ''
+        response.setEncoding('utf8')
+        response.on('data', chunk => { body += chunk })
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, body }))
+      })
+      request.on('error', reject)
+      request.end(`username=dsh&password=${encodeURIComponent(password)}`)
+    })
+
+    const wrong = await postLogin('wrong')
+    expect(wrong.status).toBe(401)
+    expect(wrong.body).toContain('用户名或密码错误')
+
+    for (let index = 0; index < RATE_ATTEMPTS; index += 1) await postLogin('wrong')
+    const throttled = await postLogin('wrong')
+    expect(throttled.status).toBe(401)
+    expect(throttled.body).toContain('尝试过于频繁')
   })
 
   it('enforces the IP allowlist', async () => {

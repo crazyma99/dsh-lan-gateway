@@ -18,9 +18,6 @@ export interface GatewayCredentials {
   readonly password: string
 }
 
-/** The challenge sent with every 401 so browsers open the native prompt. */
-export const BASIC_CHALLENGE = 'Basic realm="dsh-lan-gateway", charset="UTF-8"'
-
 const BASIC_PREFIX = /^basic\s+/i
 
 /** Strict base64 decode that rejects malformed input instead of best-effort parsing. */
