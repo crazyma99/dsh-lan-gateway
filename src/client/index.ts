@@ -38,7 +38,7 @@ export function apply(ctx: ClientContext): void {
   const store = new LanGatewayStore(connection)
   void store.load()
   const t = ctx.locale.bind(NS)
-  const injected = (): LanGatewaySectionInjected => ({ store, connection, t })
+  const injected = (): LanGatewaySectionInjected => ({ store, t })
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',

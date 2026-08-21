@@ -87,40 +87,6 @@ const UPGRADE_SKIP = new Set([
   'transfer-encoding',
 ])
 
-/**
- * RPC methods the gateway refuses to forward, mirroring the harness's
- * loopback-pinned privileged plane (`PRIVILEGED_METHODS` in
- * dsh-client-connection): settings, credentials, model discovery, preset
- * management, and host dialogs. The gateway rewrites Host to loopback, which
- * would otherwise make these methods look loopback-originated and defeat the
- * harness's own fence — so the gateway re-establishes the boundary itself.
- * Keep this list in sync with the harness's PRIVILEGED_METHODS when upgrading.
- */
-const PRIVILEGED_API_PREFIXES = [
-  // settings.describe stays reachable: it is redacted (no secrets) and every
-  // settings page needs it to render. All WRITES and the rest of the
-  // privileged plane remain loopback-only.
-  '/api/settings.update',
-  '/api/settings.replace',
-  '/api/settings.mutate',
-  '/api/settings.openDocument',
-  '/api/credentials.',
-  '/api/llm.discoverModels',
-  '/api/agentPreset.read',
-  '/api/agentPreset.copy',
-  '/api/agentPreset.openDocument',
-  '/api/agentPreset.remove',
-  '/api/host.pickDirectory',
-  '/api/host.openPath',
-  // This plugin's own management channel: config/status stay loopback-only.
-  '/lan-gateway',
-]
-
-/** Whether one request path targets the privileged, loopback-pinned RPC plane. */
-function isPrivilegedApiPath(pathname: string): boolean {
-  return PRIVILEGED_API_PREFIXES.some(prefix => pathname.startsWith(prefix))
-}
-
 const SESSION_COOKIE = 'lan_gateway_session'
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 const LOGIN_BODY_LIMIT = 4096
@@ -540,12 +506,6 @@ export class LanGatewayEngine {
       return
     }
     if (!isAllowed(req.socket.remoteAddress, config.allowlist)) {
-      this.denied(res, 403, 'Forbidden\n')
-      return
-    }
-    if (isPrivilegedApiPath(pathname)) {
-      // The harness pins the settings/credentials plane to loopback; a
-      // Host-rewriting proxy would smuggle it through, so refuse it here.
       this.denied(res, 403, 'Forbidden\n')
       return
     }

@@ -5,7 +5,6 @@
  * expose external plugin namespaces, so this plugin owns its transport.
  */
 import { useEffect, useState, type ReactNode } from 'react'
-import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-web-react'
 import { Button, Modal, StateDot, type StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { GatewayStatus } from '../gateway.ts'
@@ -15,13 +14,11 @@ import type { LanGatewayKey } from './locales.ts'
 
 export interface LanGatewaySectionInjected {
   readonly store: LanGatewayStore
-  readonly connection: ConnectionHandle
   readonly t: (key: LanGatewayKey) => string
 }
 
 export interface LanGatewaySectionProps {
   readonly store: LanGatewayStore
-  readonly connection: ConnectionHandle
   readonly t: (key: LanGatewayKey) => string
 }
 
@@ -142,7 +139,7 @@ function StatusItem(props: { label: string; children: ReactNode }) {
   )
 }
 
-export function LanGatewaySection({ store, connection, t }: LanGatewaySectionProps) {
+export function LanGatewaySection({ store, t }: LanGatewaySectionProps) {
   const useSnapshot = bindSnapshotSelector(store)
   const snapshot = useSnapshot(s => s)
   const config = snapshot.config
@@ -270,8 +267,6 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
       <h2 style={{ color: 'var(--dsw-alias-label-primary)', fontSize: 16, margin: 0 }}>{t('title')}</h2>
       <p style={style.muted}>{t('description')}</p>
 
-      {!connection.isLoopback && <div style={style.warning}>{t('form.readonly')}</div>}
-
       <div style={style.row}>
         <div>
           <div style={style.label}>{t('master.enabled')}</div>
@@ -279,7 +274,6 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
         </div>
         <Switch
           checked={enabled}
-          disabled={!connection.isLoopback}
           label={t('master.enabled')}
           onChange={next => { void toggleEnabled(next) }}
         />
@@ -322,7 +316,7 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
         </div>
       )}
 
-      <fieldset disabled={!connection.isLoopback} style={{ border: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <fieldset style={{ border: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={style.row}>
           <div>
             <div style={style.label}>{t('form.port')}</div>
@@ -333,8 +327,7 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
             value={portDraft}
             min={0}
             max={65535}
-            disabled={!connection.isLoopback}
-            onChange={event => setPortDraft(event.target.value)}
+              onChange={event => setPortDraft(event.target.value)}
             onBlur={() => { void commitPort() }}
             style={{ ...style.input, width: 104, textAlign: 'right' }}
           />
@@ -347,8 +340,7 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
           </div>
           <select
             value={config?.tlsMode ?? 'self-signed'}
-            disabled={!connection.isLoopback}
-            onChange={event => { void commit('tlsMode', event.target.value) }}
+              onChange={event => { void commit('tlsMode', event.target.value) }}
             style={style.input}
           >
             <option value="self-signed">{t('form.tls.selfSigned')}</option>
@@ -363,8 +355,7 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
               <input
                 type="text"
                 defaultValue={config.certPath}
-                disabled={!connection.isLoopback}
-                onBlur={event => {
+                      onBlur={event => {
                   if (event.target.value !== config.certPath) void commit('certPath', event.target.value)
                 }}
                 style={{ ...style.input, width: 220 }}
@@ -375,8 +366,7 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
               <input
                 type="text"
                 defaultValue={config.keyPath}
-                disabled={!connection.isLoopback}
-                onBlur={event => {
+                      onBlur={event => {
                   if (event.target.value !== config.keyPath) void commit('keyPath', event.target.value)
                 }}
                 style={{ ...style.input, width: 220 }}
@@ -393,8 +383,7 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
           <Button
             variant="outline"
             size="sm"
-            disabled={!connection.isLoopback}
-            onClick={() => openCredentialModal('edit')}
+              onClick={() => openCredentialModal('edit')}
           >
             {t('cred.manage.action')}
           </Button>
@@ -408,8 +397,7 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
           <textarea
             value={allowlistDraft}
             placeholder="192.168.1.0/24"
-            disabled={!connection.isLoopback}
-            onChange={event => setAllowlistDraft(event.target.value)}
+              onChange={event => setAllowlistDraft(event.target.value)}
             onBlur={() => { void commitAllowlist() }}
             style={style.textarea}
           />
@@ -419,7 +407,7 @@ export function LanGatewaySection({ store, connection, t }: LanGatewaySectionPro
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 6 }}>
-          <Button variant="primary" size="sm" disabled={!connection.isLoopback} onClick={() => {
+          <Button variant="primary" size="sm" onClick={() => {
             void commitPort()
             void commitAllowlist()
           }}>
