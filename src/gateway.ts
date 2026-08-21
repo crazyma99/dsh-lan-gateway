@@ -308,13 +308,9 @@ export class LanGatewayEngine {
     }
   }
 
+  /** Live connection count from the tracked socket set (synchronous). */
   private countConnections(): number {
-    if (this.server === undefined) return 0
-    let count = 0
-    this.server.getConnections((_error, value) => {
-      count = value
-    })
-    return count
+    return this.sockets.size
   }
 
   private loadTls(config: GatewayConfig): TlsMaterial {

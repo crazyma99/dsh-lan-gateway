@@ -381,6 +381,34 @@ describe('LanGatewayEngine', () => {
     expect(upstream!.seenUpgradeHead).toContain(`origin=http://127.0.0.1:${String(upstream!.port)}`)
   })
 
+  it('reports live active-connection counts', async () => {
+    engine!.apply(config({}))
+    const status = await waitFor(() => engine!.getStatus(), value => value.state === 'running')
+    expect(engine!.getStatus().activeConnections).toBe(0)
+
+    // A keep-alive connection stays open after the response and must count.
+    const agent = new https.Agent({ keepAlive: true, maxSockets: 1, rejectUnauthorized: false })
+    await new Promise<void>((resolve, reject) => {
+      const request = https.request({
+        host: '127.0.0.1',
+        port: status.port!,
+        path: '/hello',
+        method: 'GET',
+        agent,
+        headers: { authorization: `Basic ${Buffer.from('dsh:s3cret').toString('base64')}` },
+      }, (response) => {
+        response.resume()
+        response.on('end', () => resolve())
+      })
+      request.on('error', reject)
+      request.end()
+    })
+    await waitFor(() => engine!.getStatus().activeConnections, value => value >= 1)
+
+    agent.destroy()
+    await waitFor(() => engine!.getStatus().activeConnections, value => value === 0)
+  })
+
   it('stops on disable and reports off', async () => {
     engine!.apply(config({}))
     await waitFor(() => engine!.getStatus(), value => value.state === 'running')
