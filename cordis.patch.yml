@@ -1,0 +1,20 @@
+# dsh-lan-gateway bundle patch: compose the LAN gateway plugin into the tree.
+# The row mounts the package once; its node half provides the gateway engine,
+# settings namespace, and status RPC, while the `dsh.client` manifest on the
+# package makes the same row visible to the browser roster scan.
+#
+# Composition defaults below are the settings base layer; every value can be
+# overridden per-user from the WebUI settings section, and `enabled` always
+# defaults to off.
+- insert:
+    - id: lan-gateway
+      name: 'dsh-lan-gateway'
+      config:
+        enabled: false
+        port: 8443
+        tlsMode: self-signed
+        certPath: ''
+        keyPath: ''
+        username: dsh
+        password: ''
+        allowlist: []

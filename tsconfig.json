@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "outDir": "lib/types",
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@deepseek-ai/cordis": ["/home/majunhi/deepseek-harness/vendor/cordis/lib/types/index.d.ts"],
+      "@deepseek-ai/schemastery": ["/home/majunhi/deepseek-harness/vendor/schemastery/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-settings": ["/home/majunhi/deepseek-harness/packages/settings/settings/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-host-webserver": ["/home/majunhi/deepseek-harness/packages/host/webserver/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-connection": ["/home/majunhi/deepseek-harness/packages/client/connection/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-runtime/client": ["/home/majunhi/deepseek-harness/packages/client/runtime/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-api-remotes/client": ["/home/majunhi/deepseek-harness/packages/api/remotes/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-settings/client": ["/home/majunhi/deepseek-harness/packages/client/ui-settings/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-locale/client": ["/home/majunhi/deepseek-harness/packages/client/locale/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-slots": ["/home/majunhi/deepseek-harness/packages/client/ui-slots/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["/home/majunhi/deepseek-harness/packages/client/ui-primitives/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-web-react": ["/home/majunhi/deepseek-harness/packages/client/web-react/lib/types/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}
